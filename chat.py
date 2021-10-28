@@ -20,7 +20,7 @@ class chat(commands.Cog):
 	
 	@commands.command()
 	async def av(self, ctx):
-		seq = ["Cadê o cabo", "Av tixão miquinha", "GTX 1660"]
+		seq = ["Cadê o cabo", "Av tixão miquinha", "GTX 1660", "Main evelyn e akali ao mesmo tempo kkk"]
 		choice_made = random.choice(seq)
 		await ctx.send(choice_made)
 
