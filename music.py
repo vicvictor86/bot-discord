@@ -7,33 +7,36 @@ class music(commands.Cog):
 	def __init__(self, client):
 		self.client = client
 
-	list_of_music = []
-	informations_of_music = []
+	music_list = []
+	musics_information = []
 	index_actual = 0
 	can_repeating = False
 	FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+	force_change = False
 
 	@commands.command()
 	async def join(self, ctx):
 		if ctx.author.voice is None:
 			await ctx.send("Entra numa chamada de voz seu paspalho")
+		
 		voice_channel = ctx.author.voice.channel
-
 		if ctx.voice_client is None:
-			self.clear()
+			await self.clear(ctx)
 			await voice_channel.connect()
 		else:
-			self.clear()
+			await self.clear(ctx)
 			await ctx.voice_client.move_to(voice_channel)
 
 	@commands.command()
 	async def disconnect(self, ctx):
-		self.clear()
+		await self.clear(ctx)
 		await ctx.voice_client.disconnect()
 
 	@commands.command()
-	async def clear(self):
-		self.list_of_music.clear()
+	async def clear(self, ctx):
+		self.music_list.clear()
+		self.musics_information.clear()
+		await ctx.send("Passei a limpa nessa lista de músicas aqui")
 
 	@commands.command()
 	async def play(self, ctx, *args):
@@ -43,37 +46,41 @@ class music(commands.Cog):
 		print(music_name)
 
 		if ctx.voice_client is None:
-			self.clear()
+			await self.clear(ctx)
 			await voice_channel.connect()
 		else:
 			await ctx.voice_client.move_to(voice_channel)
 		
 		YDL_OPTIONS = {'format': "bestaudio", 'default_search': 'auto'}
-		vc = ctx.voice_client
+		voice_client = ctx.voice_client
 
 		with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
 			info = ydl.extract_info(music_name, download = False)
 
 			if 'entries' in info:
 				video_format = info['entries'][0]["formats"][0]
-				self.informations_of_music.append(info['entries'][0]['title'])
+				self.musics_information.append(info['entries'][0]['title'])
 			elif 'formats' in  info:
 				video_format = info["formats"][0]
-				self.informations_of_music.append(info.get('title', None))
+				self.musics_information.append(info.get('title', None))
 
 			stream_url = video_format["url"]
-			self.list_of_music.append(stream_url)
+			self.music_list.append(stream_url)
 			
 			source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
-			if not vc.is_playing():
-				vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+			if not voice_client.is_playing():
+				voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
 
 	@commands.command()
 	async def play_next(self, ctx):
 		voice_client = ctx.voice_client
-
-		url = self.list_of_music[self.index_actual + 1]
-		self.index_actual += 1
+		
+		"""Verifica se o play_next não foi disparado por uma alteração da lista forçada
+		como prev, next, jump pois nesses eventos ele não deve adicionar mais 1 no índice da lista"""
+		if not self.force_change:
+			url = self.music_list[self.index_actual + 1]
+			self.index_actual += 1
+		self.force_change = False
 
 		source = await discord.FFmpegOpusAudio.from_probe(url, **self.FFMPEG_OPTIONS)
 		voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
@@ -82,10 +89,17 @@ class music(commands.Cog):
 	async def remove(self, ctx, pos_remove):
 		try:
 			pos_remove = int(pos_remove)
-			self.list_of_music.pop(pos_remove - 1)			
-			self.informations_of_music.pop(pos_remove - 1)
+			self.music_list.pop(pos_remove - 1)			
+			self.musics_information.pop(pos_remove - 1)
 		except:
 			await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
+	
+	async def playing_forced_music(self, ctx, stream_url, voice_client):
+		self.force_change = True
+
+		source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
+		voice_client.stop()
+		voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
 
 	@commands.command()
 	async def prev(self, ctx):
@@ -95,21 +109,18 @@ class music(commands.Cog):
 			if voice_client.is_playing():
 				
 				if self.can_repeating == True and self.index_actual - 1 < 0:
-					self.index_actual = len(self.list_of_music) - 1
-					stream_url = self.list_of_music[self.index_actual]
+					self.index_actual = len(self.music_list) - 1
+					stream_url = self.music_list[self.index_actual]
 				else:
-					stream_url = self.list_of_music[self.index_actual - 1]
+					stream_url = self.music_list[self.index_actual - 1]
 					self.index_actual -= 1
 
 				if self.index_actual < 0:
 					self.index_actual = 0
 					await ctx.send("A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a  reprodução anterior, filho da puta.")
 					return
-
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
 				
-				voice_client.stop()
-				voice_client.play(source)
+				await self.playing_forced_music(ctx, stream_url, voice_client)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
 
@@ -121,11 +132,11 @@ class music(commands.Cog):
 			if voice_client.is_playing():
 				
 				try:
-					if self.can_repeating == True and self.index_actual + 1 > len(self.list_of_music) - 1:
+					if self.can_repeating == True and self.index_actual + 1 > len(self.music_list) - 1:
 						self.index_actual = 0
-						stream_url = self.list_of_music[self.index_actual]
+						stream_url = self.music_list[self.index_actual]
 					else: 
-						stream_url = self.list_of_music[self.index_actual + 1]
+						stream_url = self.music_list[self.index_actual + 1]
 						self.index_actual += 1
 						
 
@@ -133,9 +144,7 @@ class music(commands.Cog):
 					await ctx.send("A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
 					return
 
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
-				voice_client.stop()
-				voice_client.play(source)
+				await self.playing_forced_music(ctx, stream_url, voice_client)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar next?")
 
@@ -153,7 +162,7 @@ class music(commands.Cog):
 		index_jump = int(index_jump) - 1
 		if index_jump < 0:
 			index_jump = 0 
-		elif index_jump > len(self.list_of_music):
+		elif index_jump > len(self.music_list):
 			await ctx.send("Amigo, olhe a lista de novo, bota direito")
 		voice_client = ctx.voice_client
 
@@ -161,15 +170,13 @@ class music(commands.Cog):
 			if voice_client.is_playing():
 				
 				try:
-					stream_url = self.list_of_music[index_jump]
+					stream_url = self.music_list[index_jump]
 					self.index_actual = index_jump
 				except:
 					await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
 					return
 
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
-				voice_client.stop()
-				voice_client.play(source)
+				await self.playing_forced_music(ctx, stream_url, voice_client)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar jump?")
 			
@@ -178,8 +185,8 @@ class music(commands.Cog):
 		index_in_list = 0
 		list_musics = ''
 
-		for music in self.list_of_music:
-			list_musics += f"{index_in_list + 1}. {self.informations_of_music[index_in_list]}\n"
+		for music in self.music_list:
+			list_musics += f"{index_in_list + 1}. {self.musics_information[index_in_list]}\n"
 			index_in_list += 1
 
 		if list_musics == '':
