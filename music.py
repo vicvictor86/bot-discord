@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import youtube_dl
+import asyncio
 
 class music(commands.Cog):
 	def __init__(self, client):
@@ -10,71 +11,88 @@ class music(commands.Cog):
 	informations_of_music = []
 	index_actual = 0
 	can_repeating = False
+	FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 
 	@commands.command()
 	async def join(self, ctx):
 		if ctx.author.voice is None:
 			await ctx.send("Entra numa chamada de voz seu paspalho")
 		voice_channel = ctx.author.voice.channel
+
 		if ctx.voice_client is None:
-			self.list_of_music.clear()
+			self.clear()
 			await voice_channel.connect()
 		else:
-			self.list_of_music.clear()
+			self.clear()
 			await ctx.voice_client.move_to(voice_channel)
 
 	@commands.command()
 	async def disconnect(self, ctx):
-		self.list_of_music.clear()
+		self.clear()
 		await ctx.voice_client.disconnect()
 
 	@commands.command()
-	async def clear(self, ctx):
+	async def clear(self):
 		self.list_of_music.clear()
 
 	@commands.command()
 	async def play(self, ctx, *args):
 		voice_channel = ctx.author.voice.channel
 
-		url = ' '.join(args)
-		print(url)
+		music_name = ' '.join(args)
+		print(music_name)
 
 		if ctx.voice_client is None:
-			self.list_of_music.clear()
+			self.clear()
 			await voice_channel.connect()
 		else:
 			await ctx.voice_client.move_to(voice_channel)
-			
-		FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+		
 		YDL_OPTIONS = {'format': "bestaudio", 'default_search': 'auto'}
 		vc = ctx.voice_client
 
 		with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
-			info = ydl.extract_info(url, download = False)
+			info = ydl.extract_info(music_name, download = False)
 
 			if 'entries' in info:
 				video_format = info['entries'][0]["formats"][0]
+				self.informations_of_music.append(info['entries'][0]['title'])
 			elif 'formats' in  info:
 				video_format = info["formats"][0]
+				self.informations_of_music.append(info.get('title', None))
 
 			stream_url = video_format["url"]
-
 			self.list_of_music.append(stream_url)
-			self.informations_of_music.append(info['entries'][0]['title'])
-			#print(self.list_of_music)
-			#print(info)
-
-			source = await discord.FFmpegOpusAudio.from_probe(stream_url, **FFMPEG_OPTIONS)
 			
+			source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
 			if not vc.is_playing():
-				vc.play(source)
+				vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+
+	@commands.command()
+	async def play_next(self, ctx):
+		voice_client = ctx.voice_client
+
+		url = self.list_of_music[self.index_actual + 1]
+		self.index_actual += 1
+
+		source = await discord.FFmpegOpusAudio.from_probe(url, **self.FFMPEG_OPTIONS)
+		voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+
+	@commands.command()
+	async def remove(self, ctx, pos_remove):
+		try:
+			pos_remove = int(pos_remove)
+			self.list_of_music.pop(pos_remove - 1)			
+			self.informations_of_music.pop(pos_remove - 1)
+		except:
+			await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
 
 	@commands.command()
 	async def prev(self, ctx):
-		vc = ctx.voice_client
+		voice_client = ctx.voice_client
 
 		try:
-			if vc.is_playing():
+			if voice_client.is_playing():
 				
 				if self.can_repeating == True and self.index_actual - 1 < 0:
 					self.index_actual = len(self.list_of_music) - 1
@@ -88,22 +106,19 @@ class music(commands.Cog):
 					await ctx.send("A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a  reprodução anterior, filho da puta.")
 					return
 
-				print(self.index_actual)
+				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
 				
-				FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **FFMPEG_OPTIONS)
-				
-				vc.stop()
-				vc.play(source)
+				voice_client.stop()
+				voice_client.play(source)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
 
 	@commands.command()
 	async def next(self, ctx):
-		vc = ctx.voice_client
+		voice_client = ctx.voice_client
 
 		try:
-			if vc.is_playing():
+			if voice_client.is_playing():
 				
 				try:
 					if self.can_repeating == True and self.index_actual + 1 > len(self.list_of_music) - 1:
@@ -118,10 +133,9 @@ class music(commands.Cog):
 					await ctx.send("A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
 					return
 
-				FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **FFMPEG_OPTIONS)
-				vc.stop()
-				vc.play(source)
+				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
+				voice_client.stop()
+				voice_client.play(source)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar next?")
 
@@ -141,10 +155,10 @@ class music(commands.Cog):
 			index_jump = 0 
 		elif index_jump > len(self.list_of_music):
 			await ctx.send("Amigo, olhe a lista de novo, bota direito")
-		vc = ctx.voice_client
+		voice_client = ctx.voice_client
 
 		try:
-			if vc.is_playing():
+			if voice_client.is_playing():
 				
 				try:
 					stream_url = self.list_of_music[index_jump]
@@ -153,10 +167,9 @@ class music(commands.Cog):
 					await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
 					return
 
-				FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **FFMPEG_OPTIONS)
-				vc.stop()
-				vc.play(source)
+				source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
+				voice_client.stop()
+				voice_client.play(source)
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar jump?")
 			
@@ -164,12 +177,15 @@ class music(commands.Cog):
 	async def q(self, ctx):
 		index_in_list = 0
 		list_musics = ''
+
 		for music in self.list_of_music:
 			list_musics += f"{index_in_list + 1}. {self.informations_of_music[index_in_list]}\n"
 			index_in_list += 1
+
 		if list_musics == '':
 			await ctx.send("Tem nenhuma música na lista, adiciona uma pra esse comando deixar de ser inútil")
 			return
+
 		await ctx.send(list_musics)
 
 	@commands.command()
@@ -187,6 +203,14 @@ class music(commands.Cog):
 			await ctx.send("RESUMEI ESSA CARAIA")
 		except:
 			await ctx.send("Tem nenhuma música tocando não seu mula")
+
+	@commands.command()
+	async def stop(self, ctx):		
+		try:
+			ctx.voice_client.stop()
+			await ctx.send("ESTOPEI ESSA CARAIA")
+		except:
+			await ctx.send("Tu quer estopar o que seu mula?")
 
 def setup(client):
 	client.add_cog(music(client))
