@@ -2,22 +2,23 @@ import discord
 from discord.ext import commands
 import youtube_dl
 import asyncio
+import random
 
 class music(commands.Cog):
 	def __init__(self, client):
 		self.client = client
 
+	#uma lista que irá conter dicionários com no formato titulo da música : url da música
 	music_list = []
-	musics_information = []
 	index_actual = 0
 	can_repeating = False
 	FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 	force_change = False
-
+	
 	@commands.command()
 	async def join(self, ctx):
 		if ctx.author.voice is None:
-			await ctx.send("Entra numa chamada de voz seu paspalho")
+			await ctx.send("Entra numa chamada de voz, seu paspalho")
 		
 		voice_channel = ctx.author.voice.channel
 		if ctx.voice_client is None:
@@ -35,7 +36,6 @@ class music(commands.Cog):
 	@commands.command()
 	async def clear(self, ctx):
 		self.music_list.clear()
-		self.musics_information.clear()
 		await ctx.send("Passei a limpa nessa lista de músicas aqui")
 
 	@commands.command()
@@ -56,20 +56,25 @@ class music(commands.Cog):
 
 		with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
 			info = ydl.extract_info(music_name, download = False)
+			music_title = ''
 
 			if 'entries' in info:
 				video_format = info['entries'][0]["formats"][0]
-				self.musics_information.append(info['entries'][0]['title'])
+				music_title = info['entries'][0]['title']
 			elif 'formats' in  info:
 				video_format = info["formats"][0]
-				self.musics_information.append(info.get('title', None))
+				music_title = info.get('title', None)
 
 			stream_url = video_format["url"]
-			self.music_list.append(stream_url)
+			self.music_list.append({music_title : stream_url})
 			
 			source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
 			if not voice_client.is_playing():
 				voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+
+	def get_music_url(self, index):
+		music_url = list(self.music_list[index].values())
+		return music_url[0]
 
 	@commands.command()
 	async def play_next(self, ctx):
@@ -77,9 +82,15 @@ class music(commands.Cog):
 		
 		"""Verifica se o play_next não foi disparado por uma alteração da lista forçada
 		como prev, next, jump pois nesses eventos ele não deve adicionar mais 1 no índice da lista"""
+
 		if not self.force_change:
-			url = self.music_list[self.index_actual + 1]
-			self.index_actual += 1
+			if self.can_repeating == True and self.index_actual + 1 > len(self.music_list) - 1:
+				self.index_actual = 0
+				url = self.get_music_url(self.index_actual)
+			else:	
+				url = self.get_music_url(self.index_actual + 1)
+				self.index_actual += 1
+
 		self.force_change = False
 
 		source = await discord.FFmpegOpusAudio.from_probe(url, **self.FFMPEG_OPTIONS)
@@ -89,8 +100,7 @@ class music(commands.Cog):
 	async def remove(self, ctx, pos_remove):
 		try:
 			pos_remove = int(pos_remove)
-			self.music_list.pop(pos_remove - 1)			
-			self.musics_information.pop(pos_remove - 1)
+			self.music_list.pop(pos_remove - 1)
 		except:
 			await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
 	
@@ -110,9 +120,9 @@ class music(commands.Cog):
 				
 				if self.can_repeating == True and self.index_actual - 1 < 0:
 					self.index_actual = len(self.music_list) - 1
-					stream_url = self.music_list[self.index_actual]
+					stream_url = self.get_music_url(self.index_actual)
 				else:
-					stream_url = self.music_list[self.index_actual - 1]
+					stream_url = self.get_music_url(self.index_actual - 1)
 					self.index_actual -= 1
 
 				if self.index_actual < 0:
@@ -134,12 +144,10 @@ class music(commands.Cog):
 				try:
 					if self.can_repeating == True and self.index_actual + 1 > len(self.music_list) - 1:
 						self.index_actual = 0
-						stream_url = self.music_list[self.index_actual]
+						stream_url = self.get_music_url(self.index_actual)
 					else: 
-						stream_url = self.music_list[self.index_actual + 1]
+						stream_url = self.get_music_url(self.index_actual + 1)
 						self.index_actual += 1
-						
-
 				except:
 					await ctx.send("A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
 					return
@@ -162,31 +170,33 @@ class music(commands.Cog):
 		index_jump = int(index_jump) - 1
 		if index_jump < 0:
 			index_jump = 0 
-		elif index_jump > len(self.music_list):
-			await ctx.send("Amigo, olhe a lista de novo, bota direito")
 		voice_client = ctx.voice_client
 
 		try:
-			if voice_client.is_playing():
-				
-				try:
-					stream_url = self.music_list[index_jump]
-					self.index_actual = index_jump
-				except:
-					await ctx.send("Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
-					return
-
-				await self.playing_forced_music(ctx, stream_url, voice_client)
+			stream_url = self.get_music_url(index_jump)
+			self.index_actual = index_jump
 		except:
-			await ctx.send("Tem nenhuma música tocando não seu mula, como que eu vou dar jump?")
-			
+			await ctx.send("Tu botou uma música que não existe, olha a lista de novo e bota direito da próxima vez.")
+			return
+		await self.playing_forced_music(ctx, stream_url, voice_client)
+		
+	@commands.command()
+	async def shuffle(self, ctx):
+		random.shuffle(self.music_list)
+		await ctx.send("A playlist foi bagunçada com sucesso, meu peixe")
+
 	@commands.command()
 	async def q(self, ctx):
 		index_in_list = 0
 		list_musics = ''
 
+		#music_list colocará em music um dicionário contendo o título da música
+		#e a sua url, mas na listagem só necessitamos do título, logo pegamos esse dicionário
+		#coletamos o set de chave dele e transformamos em list para pegar o primeiro elemento dessa list
 		for music in self.music_list:
-			list_musics += f"{index_in_list + 1}. {self.musics_information[index_in_list]}\n"
+			music_name = list(music.keys())
+
+			list_musics += f"{index_in_list + 1}. {music_name[0]}\n"
 			index_in_list += 1
 
 		if list_musics == '':
