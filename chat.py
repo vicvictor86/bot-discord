@@ -13,7 +13,11 @@ class chat(commands.Cog):
 	@commands.command()
 	async def xlr8(self, ctx):
 		await ctx.send(file=discord.File("Images/xlr8.jpg"))
-	
+
+	@commands.command()
+	async def sonicputo(self, ctx):
+		await ctx.send(file=discord.File("Images/sonic-capa-615x300.png"))
+
 	@commands.command()
 	async def heloa(self, ctx):
 		await ctx.send("Cara chato")
