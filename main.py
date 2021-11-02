@@ -3,11 +3,11 @@ import discord
 from keep_alive import keep_alive
 import music
 import chat
+import helpfun
 from discord.ext import commands
 
-cogs = [music, chat]
+cogs = [music, chat, helpfun]
 
-#client = discord.Client()
 client = commands.Bot(command_prefix='$', intents = discord.Intents.all(), case_insensitive = True)
 
 for i in range(len(cogs)):
