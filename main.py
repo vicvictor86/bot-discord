@@ -8,7 +8,7 @@ from discord.ext import commands
 
 cogs = [music, chat, helpfun]
 
-client = commands.Bot(command_prefix='$', intents = discord.Intents.all(), case_insensitive = True)
+client = commands.Bot(command_prefix='$', intents = discord.Intents.all(), case_insensitive = True, help_command = None)
 
 for i in range(len(cogs)):
 	cogs[i].setup(client)

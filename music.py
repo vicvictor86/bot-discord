@@ -8,7 +8,7 @@ class music(commands.Cog):
 	def __init__(self, client):
 		self.client = client
 
-	#uma lista que irá conter dicionários com no formato titulo da música : url da música
+	#uma lista que irá conter dicionários com no formato titulo da música : url da música, "tamanho_musica" : tamanho da música
 	music_list = []
 	index_actual = 0
 	can_repeating = False
@@ -18,7 +18,7 @@ class music(commands.Cog):
 	@commands.command()
 	async def join(self, ctx):
 		if ctx.author.voice is None:
-			await self.embed_with_one_lien(ctx, "Entra numa chamada de voz, seu paspalho")
+			await self.embed_with_one_line(ctx, "Entra numa chamada de voz, seu paspalho")
 		
 		voice_channel = ctx.author.voice.channel
 		if ctx.voice_client is None:
@@ -27,7 +27,7 @@ class music(commands.Cog):
 		else:
 			await self.clear(ctx)
 			await ctx.voice_client.move_to(voice_channel)
-		await self.embed_with_one_lien(ctx, "FALA RAPAIZE, CHEGUEI")
+		await self.embed_with_one_line(ctx, "FALA RAPAIZE, CHEGUEI")
 
 	@commands.command()
 	async def disconnect(self, ctx):
@@ -38,18 +38,37 @@ class music(commands.Cog):
 	async def clear(self, ctx, coming_play = False):
 		self.music_list.clear()
 		if not coming_play:
-			await self.embed_with_one_lien(ctx, "Passei a limpa nessa lista de músicas aqui")
+			await self.embed_with_one_line(ctx, "Passei a limpa nessa lista de músicas aqui")
 
-	@commands.command()
-	async def p(self, ctx, *args):
-		await self.play(ctx, *args)
+	async def playing_in_channel(self, ctx, URL, music_title, voice_client):
+		source = await discord.FFmpegOpusAudio.from_probe(URL, **self.FFMPEG_OPTIONS)
+		if not voice_client.is_playing():
+			embed = discord.Embed(title = f"{ctx.author.display_name} adicionou uma música", url = f"{URL}", description = f"A música colocada foi {music_title}", color = 0x054f77)
+			await ctx.send(embed = embed)
+			voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
 
-	@commands.command()
+	def define_music_info(self, info):
+		URL = info.get("url", None)
+		music_title = info.get('title', None)
+
+		lenght_info = int(info.get("duration"))
+		lenght_minutes = int(lenght_info / 60)
+		lenght_seconds = int(lenght_info % 60)
+		lenght = f"{lenght_minutes}:{lenght_seconds}"
+		
+		self.music_list.append({music_title : URL, "music_lenght" : lenght})
+		return URL, music_title
+
+	@commands.command(aliases=["p"])
 	async def play(self, ctx, *args):
 		voice_channel = ctx.author.voice.channel
+		is_playlist = False
 
 		music_name = ' '.join(args)
 		print(music_name)
+
+		if "list" in music_name:
+			is_playlist = True
 
 		if ctx.voice_client is None:
 			await self.clear(ctx, True)
@@ -57,30 +76,31 @@ class music(commands.Cog):
 		else:
 			await ctx.voice_client.move_to(voice_channel)
 		
-		YDL_OPTIONS = {'format': "bestaudio", 'default_search': 'auto'}
+		YDL_OPTIONS = {'format': "bestaudio", 'default_search': 'auto', 'noplaylist': is_playlist}
 		voice_client = ctx.voice_client
 
+		if(is_playlist):
+			with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
+				info = ydl.extract_info(music_name, download = False)
+				URL = info.get("url", None)
+				music_title = info.get("title", None)
+			
+			is_playlist = False
+			
+			await self.playing_in_channel(ctx, URL, music_title, voice_client)
+
+		YDL_OPTIONS = {'format': "bestaudio", 'default_search': 'auto', 'noplaylist': is_playlist}
 		with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
 			info = ydl.extract_info(music_name, download = False)
 			music_title = ''
 
 			if 'entries' in info:
-				video_format = info['entries'][0]["formats"][0]
-				music_title = info['entries'][0]['title']
+				for music_info in info["entries"]:
+					URL, music_title = self.define_music_info(music_info)
 			elif 'formats' in  info:
-				video_format = info["formats"][0]
-				music_title = info.get('title', None)
+				URL, music_title = self.define_music_info(info)
 
-			stream_url = video_format["url"]
-			self.music_list.append({music_title : stream_url})
-
-			embed = discord.Embed(title = f"{ctx.author.display_name} adicionou uma música", url = f"{stream_url}", description = f"A música colocada foi {music_title}", color = 0x054f77)
-			await ctx.send(embed = embed)
-
-			source = await discord.FFmpegOpusAudio.from_probe(stream_url, **self.FFMPEG_OPTIONS)
-			if not voice_client.is_playing():
-				voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
-				
+			await self.playing_in_channel(ctx, URL, music_title, voice_client)
 				
 	def get_music_url(self, index):
 		music_url = list(self.music_list[index].values())
@@ -113,7 +133,7 @@ class music(commands.Cog):
 		embed = discord.Embed(title = f"A música que está tocando agora é {next_music_name}", url = f"{url}", description = "SOLTA O SOM DJ", color = 0x054f77)
 		await ctx.send(embed = embed)
 
-	async def embed_whith_one_line(self, ctx, execution):
+	async def embed_with_one_line(self, ctx, execution):
 		text_embed = execution
 
 		embed = discord.Embed(title = text_embed, url = "", description = "", color = 0x054f77)
@@ -133,7 +153,7 @@ class music(commands.Cog):
 			embed = discord.Embed(title = f"A música {music_name} foi removida com sucesso ", url = f"{url}", description = "prende o som dj", color = 0x054f77)
 			await ctx.send(embed = embed)
 		except:
-			await self.embed_whith_one_line(ctx, "Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
+			await self.embed_with_one_line(ctx, "Tu botou uma música que não existe meu peixe, bota direito da próxima vez.")
 	
 	async def playing_forced_music(self, ctx, stream_url, voice_client):
 		self.force_change = True
@@ -165,15 +185,15 @@ class music(commands.Cog):
 
 				if self.index_actual < 0:
 					self.index_actual = 0
-					await self.embed_whith_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a  reprodução anterior, filho da puta.")
+					await self.embed_with_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a  reprodução anterior, filho da puta.")
 					return
 				
 				await self.embed_forced_music("Tou dando um passo pá trás para a música", stream_url, "VOLTA UMA MÚSICA DJ", ctx)
 				await self.playing_forced_music(ctx, stream_url, voice_client)
 		except:
-			await self.embed_whith_one_line(ctx, "Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
+			await self.embed_with_one_line(ctx, "Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
 
-	@commands.command()
+	@commands.command(aliases=["n"])
 	async def next(self, ctx):
 		voice_client = ctx.voice_client
 
@@ -190,22 +210,22 @@ class music(commands.Cog):
 					
 					await self.embed_forced_music("Tou dando um passo pá frente para música", stream_url, "SEGUE UMA MÚSICA DJ", ctx)
 				except:
-					await self.embed_whith_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
+					await self.embed_with_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
 					return
 
 				await self.playing_forced_music(ctx, stream_url, voice_client)
 		except:
-			await self.embed_whith_one_line(ctx, "Tem nenhuma música tocando não seu mula, como que eu vou dar next?")
+			await self.embed_with_one_line(ctx, "Tem nenhuma música tocando não seu mula, como que eu vou dar next?")
 
 	@commands.command()
 	async def repeat(self, ctx):
 		self.can_repeating = not self.can_repeating
-		await self.embed_whith_one_line(ctx, f"Tou aprendendo inglês, a pergunta é estou tocando em looping? A resposta é {self.can_repeating}")
+		await self.embed_with_one_line(ctx, f"Tou aprendendo inglês, a pergunta é estou tocando em looping? A resposta é {self.can_repeating}")
 
 	@commands.command()
 	async def jump(self, ctx, index_jump):
 		if index_jump is None:
-			await self.embed_whith_one_line(ctx, "Tu é jegue? Bota um número ae pra eu saber pra qual música pular bixo")
+			await self.embed_with_one_line(ctx, "Tu é jegue? Bota um número ae pra eu saber pra qual música pular bixo")
 			return
 
 		index_jump = int(index_jump) - 1
@@ -217,7 +237,7 @@ class music(commands.Cog):
 			stream_url = self.get_music_url(index_jump)
 			self.index_actual = index_jump
 		except:
-			await self.embed_whith_one_line(ctx, "Tu botou uma música que não existe, olha a lista de novo e bota direito da próxima vez.")
+			await self.embed_with_one_line(ctx, "Tu botou uma música que não existe, olha a lista de novo e bota direito da próxima vez.")
 			return
 
 		await self.embed_forced_music("Tou dando um pulo pá algum lugar para a música", stream_url, "SALTA A MÚSICA DJ", ctx)
@@ -227,9 +247,9 @@ class music(commands.Cog):
 	@commands.command()
 	async def shuffle(self, ctx):
 		random.shuffle(self.music_list)
-		await self.embed_whith_one_line(ctx, "A playlist foi bagunçada com sucesso, meu peixe")
+		await self.embed_with_one_line(ctx, "A playlist foi bagunçada com sucesso, meu peixe")
 
-	@commands.command()
+	@commands.command(aliases=["queue"])
 	async def q(self, ctx):
 		index_in_list = 0
 		list_musics = ''
@@ -240,11 +260,11 @@ class music(commands.Cog):
 		for music in self.music_list:
 			music_name = list(music.keys())
 
-			list_musics += f"{index_in_list + 1}. {music_name[0]}\n"
+			list_musics += f"{index_in_list + 1}. {music_name[0]} ({music['music_lenght']})\n"
 			index_in_list += 1
 		
 		if list_musics == '':
-			await self.embed_whith_one_line(ctx ,"Tem nenhuma música na lista, adiciona uma pra esse comando deixar de ser inútil")
+			await self.embed_with_one_line(ctx ,"Tem nenhuma música na lista, adiciona uma pra esse comando deixar de ser inútil")
 			return
 
 		embed = discord.Embed(title = "Lista de músicas:\nAbaixo toda a demonstração do seu péssimo gosto", url = "", description = list_musics, color = 0x054f77)
@@ -264,7 +284,7 @@ class music(commands.Cog):
 			voice_client.pause()
 			await self.embed_control_music(ctx, "PAUSEI")
 		else:
-			await self.embed_whith_one_line(ctx, "Tem nenhuma música tocando não seu mula")
+			await self.embed_with_one_line(ctx, "Tem nenhuma música tocando não seu mula")
 	
 	stop_music = False
 	@commands.command()
@@ -274,9 +294,9 @@ class music(commands.Cog):
 			voice_client.resume()
 			await self.embed_control_music(ctx, "RESUMEI")
 		elif voice_client.is_playing():
-			await self.embed_whith_one_line(ctx, "A música já ta tocando ou por acaso você não percebeu?")
+			await self.embed_with_one_line(ctx, "A música já ta tocando ou por acaso você não percebeu?")
 		else:
-			await self.embed_whith_one_line(ctx, "A música da estopada amigo não posso fazer nada")
+			await self.embed_with_one_line(ctx, "A música da estopada amigo não posso fazer nada")
 
 	@commands.command()
 	async def stop(self, ctx):		
@@ -286,7 +306,7 @@ class music(commands.Cog):
 			self.stop_music = True
 			await self.embed_control_music(ctx, "ESTOPEI")
 		else:
-			await self.embed_whith_one_line(ctx, "Tu quer estopar o que seu mula?")
+			await self.embed_with_one_line(ctx, "Tu quer estopar o que seu mula?")
 
 def setup(client):
 	client.add_cog(music(client))
