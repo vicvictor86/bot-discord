@@ -3,7 +3,7 @@ from discord.ext import commands
 import youtube_dl
 import asyncio
 import random
-
+# import spotify
 
 class music(commands.Cog):
 	def __init__(self, client):
@@ -27,6 +27,7 @@ class music(commands.Cog):
 			await self.embed_with_one_line(
 				ctx, "Entra numa chamada de voz, seu paspalho")
 
+		# spotify.teste()
 		voice_channel = ctx.author.voice.channel
 		if ctx.voice_client is None:
 			await self.clear(ctx)
@@ -56,10 +57,16 @@ class music(commands.Cog):
 			color=0x054f77)
 		await ctx.send(embed=embed)
 
+	def get_music_index(self, key, value):
+		for i, dic in enumerate(self.music_list):
+			if dic.get(key) == value:
+				return i
+		return -1
+
 	async def playing_in_channel(self, ctx, url, music_title, voice_client):
 		source = await discord.FFmpegOpusAudio.from_probe(url, **self.FFMPEG_OPTIONS)
-		if not voice_client.is_playing():
-			voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+		self.index_actual = self.get_music_index(music_title, url)
+		voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
 
 	def define_music_info(self, info):
 		url = info.get("url", None)
@@ -81,9 +88,6 @@ class music(commands.Cog):
 		music_name = ' '.join(args)
 		print(music_name)
 
-		if "list" in music_name:
-			is_playlist = True
-
 		if ctx.voice_client is None:
 			await self.clear(ctx, True)
 			await voice_channel.connect()
@@ -93,6 +97,8 @@ class music(commands.Cog):
 		voice_client = ctx.voice_client
 		playlist_start = 1
 
+		if "list" in music_name:
+			is_playlist = True
 		if is_playlist:
 			YDL_OPTIONS = {
 				'format': "bestaudio",
@@ -108,7 +114,8 @@ class music(commands.Cog):
 					url, music_title = self.define_music_info(music_info)
 
 			await self.embed_add_song(ctx, url, music_title)
-			await self.playing_in_channel(ctx, url, music_title, voice_client)
+			if not voice_client.is_playing():
+				await self.playing_in_channel(ctx, url, music_title, voice_client)
 
 		YDL_OPTIONS = {
 			'format': "bestaudio",
@@ -120,16 +127,22 @@ class music(commands.Cog):
 			info = ydl.extract_info(music_name, download=False)
 			music_title = ''
 
-			# Se o comando receber um link
+			# Se o comando receber um nome de vídeo
 			if 'entries' in info:
-				contador = 0
 				for music_info in info["entries"]:
 					url, music_title = self.define_music_info(music_info)
-			# Se o comando receber um nome de vídeo
+					await self.embed_add_song(ctx, url, music_title)
+
+					if not voice_client.is_playing():
+						await self.playing_in_channel(ctx, url, music_title, voice_client)
+
+			# Se o comando receber um link
 			elif 'formats' in info:
 				url, music_title = self.define_music_info(info)
 				await self.embed_add_song(ctx, url, music_title)
-				await self.playing_in_channel(ctx, url, music_title, voice_client)
+
+				if not voice_client.is_playing():
+					await self.playing_in_channel(ctx, url, music_title, voice_client)
 
 	def get_music_url(self, index):
 		music_url = list(self.music_list[index].values())
@@ -205,7 +218,8 @@ class music(commands.Cog):
 
 		source = await discord.FFmpegOpusAudio.from_probe(url, **self.FFMPEG_OPTIONS)
 		voice_client.stop()
-		voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
+		voice_client.play(source,
+						  after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.client.loop))
 
 	async def embed_forced_music(self, title, url, description, ctx):
 		music_name = self.get_music_name(self.index_actual)
@@ -229,7 +243,8 @@ class music(commands.Cog):
 
 				if self.index_actual < 0:
 					self.index_actual = 0
-					await self.embed_with_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a reprodução anterior, filho da puta.")
+					await self.embed_with_one_line(ctx,
+												   "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a reprodução anterior, filho da puta.")
 					return
 
 				await self.embed_forced_music(
@@ -237,7 +252,8 @@ class music(commands.Cog):
 					"VOLTA UMA MÚSICA DJ", ctx)
 				await self.playing_forced_music(ctx, url, voice_client)
 		except:
-			await self.embed_with_one_line(ctx, "Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
+			await self.embed_with_one_line(ctx,
+										   "Tem nenhuma música tocando não seu mula, como que eu vou dar previous?")
 
 	@commands.command(aliases=["n"])
 	async def next(self, ctx):
@@ -245,9 +261,11 @@ class music(commands.Cog):
 		if voice_client.is_playing():
 			try:
 				url = self.jump_to_next_music()
-				await self.embed_forced_music("Tou dando um passo pá frente para música", url, "SEGUE UMA MÚSICA DJ", ctx)
+				await self.embed_forced_music("Tou dando um passo pá frente para música", url, "SEGUE UMA MÚSICA DJ",
+											  ctx)
 			except:
-				await self.embed_with_one_line(ctx, "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
+				await self.embed_with_one_line(ctx,
+											   "A fila de músicas não contém conteúdos músicais suficientes para que eu possa pular para a seguinte reprodução, filho da puta.")
 				return
 			await self.playing_forced_music(ctx, url, voice_client)
 		else:
@@ -284,6 +302,10 @@ class music(commands.Cog):
 	async def shuffle(self, ctx):
 		random.shuffle(self.music_list)
 		await self.embed_with_one_line(ctx, "A playlist foi bagunçada com sucesso, meu peixe")
+
+	@commands.command()
+	async def index(self, ctx):
+		await ctx.send(self.index_actual)
 
 	@commands.command(aliases=["queue"])
 	async def q(self, ctx):
@@ -328,7 +350,6 @@ class music(commands.Cog):
 			await self.embed_with_one_line(ctx, "Tem nenhuma música tocando não seu mula")
 
 	stop_music = False
-
 	@commands.command()
 	async def resume(self, ctx):
 		voice_client = ctx.voice_client
